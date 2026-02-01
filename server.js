@@ -46,61 +46,28 @@ app.get('/', (req, res) => {
 });
 
 app.post('/reg', (req, res) => {
-  var login = req.body.login;
-  var passw = req.body.password;
-  const user = [login, passw];
-  const sql = "INSERT INTO names(name, password) VALUES(?, ?)";
-  const sql1 = "SELECT * FROM names WHERE name=?";
+  const { login, password } = req.body;
   
-  sqlconnection.query(sql1, login, function(err, results) {
-    if(err) {
-      console.log('Ошибка поиска:', err);
-      return res.status(500).send('Ошибка сервера');
-    }
-    
-    if (results.length) {
-      console.log('АВТОРИЗАЦИЯ: Пользователь ' + login + ' уже зарегистрирован');
-      return res.send('Не удалось зарегистрироваться');
-    } else {
-      sqlconnection.query(sql, user, function(err, results) {
-        if(err) {
-          console.log('Ошибка регистрации:', err);
-          return res.status(500).send('Ошибка сервера');
-        }
-        console.log('РЕГИСТРАЦИЯ: Пользователь ' + login + ' зарегистрирован');
-        return res.send('Успешная регистрация!');
-      });
-    }
-  });
+  // Проверка в временном хранилище
+  const existingUser = users.find(u => u.login === login);
+  if (existingUser) {
+    return res.json({ error: 'User already exists' });
+  }
+  
+  users.push({ login, password });
+  console.log('Registered:', login);
+  res.json({ success: true, message: 'Registered' });
 });
 
 app.post('/aut', (req, res) => {
-  var alogin = req.body.login;
-  var apassw = req.body.password;
-  const sql1 = "SELECT password FROM names WHERE name=?";
+  const { login, password } = req.body;
   
-  sqlconnection.query(sql1, alogin, function(err, results) {
-    if(err) {
-      console.log('Ошибка авторизации:', err);
-      return res.status(500).send('Ошибка сервера');
-    }
-    
-    if (results.length) {
-      var insertedpassword = results[0].password;
-      console.log('Пароль из БД:', insertedpassword);
-      
-      if (insertedpassword == apassw) {
-        console.log('АВТОРИЗАЦИЯ: Пользователь ' + alogin + ' вошел');
-        return res.send('15,20000,66,100');
-      } else {
-        console.log('АВТОРИЗАЦИЯ: ' + alogin + ' не подобрал пароль');
-        return res.send('Неправильный пароль!');
-      }
-    } else {
-      console.log('АВТОРИЗАЦИЯ: Пользователь ' + alogin + ' не найден');
-      return res.send('Пользователь не существует');
-    }
-  });
+  const user = users.find(u => u.login === login && u.password === password);
+  if (user) {
+    res.json({ success: true, data: '15,20000,66,100' });
+  } else {
+    res.json({ error: 'Invalid credentials' });
+  }
 });
 
 // ★ ИСПРАВЛЕНО: добавлен req
@@ -130,4 +97,5 @@ app.listen(8080, '0.0.0.0', () => {
   console.log('📌 В сети: http://192.168.10.XXX:3000');
   console.log('📌 Из интернета: http://ВАШ_ВНЕШНИЙ_IP:3000');
   console.log('='.repeat(50));
+
 });
