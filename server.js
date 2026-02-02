@@ -90,7 +90,7 @@ sqlconnection.getConnection((err, connection) => {
 });
 
 // ★ ИСПРАВЛЕНО: ОДИН app.listen() в конце!
-app.listen(8080, '0.0.0.0', () => {
+app.listen(10000, '0.0.0.0', () => {
   console.log('='.repeat(50));
   console.log('✅ Сервер запущен!');
   console.log('📌 Локально: http://localhost:8080');
@@ -99,3 +99,4 @@ app.listen(8080, '0.0.0.0', () => {
   console.log('='.repeat(50));
 
 });
+
