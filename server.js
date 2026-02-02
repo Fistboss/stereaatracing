@@ -2,172 +2,145 @@ const express = require('express');
 const { Pool } = require('pg');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Только Express парсеры
-app.use(express.urlencoded({ extended: true }));
+// Парсеры для JSON
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Подключение к PostgreSQL
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-// Временное хранилище для демо (можно убрать после подключения БД)
-let users = [];
-
-// Проверка подключения к БД
-pool.connect()
-  .then(() => {
-    console.log('✅ PostgreSQL подключен успешно!');
-    
-    // Создаем таблицу если её нет
-    pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        login VARCHAR(50) UNIQUE NOT NULL,
-        password VARCHAR(100) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `).catch(err => console.log('⚠️ Таблица уже существует или ошибка:', err.message));
-  })
-  .catch(err => {
-    console.log('❌ Ошибка PostgreSQL:', err.message);
+// PostgreSQL подключение
+let pool;
+if (process.env.DATABASE_URL) {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
   });
+}
 
-// ★ Главная страница
-app.get('/', async (req, res) => {
-  try {
-    // Проверяем подключение к БД
-    const dbResult = await pool.query('SELECT NOW()');
-    const dbTime = dbResult.rows[0].now;
-    
-    res.send(`
-      <html>
-      <head>
-        <title>Сервер авторизации</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 40px; }
-          .form-container { margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
-          input { margin: 5px 0; padding: 8px; width: 200px; }
-          button { padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer; }
-          button:hover { background: #45a049; }
-        </style>
-      </head>
-      <body>
-        <h1>✅ Сервер работает!</h1>
-        <p>Порт: ${process.env.PORT || 3000}</p>
-        <p>Время в БД: ${dbTime}</p>
-        <p>PostgreSQL: подключено ✅</p>
-        
-        <h2>Тестирование через формы:</h2>
-        
-        <div class="form-container">
-          <h3>Регистрация (POST /reg)</h3>
-          <form action="/reg" method="POST">
-            Логин: <br><input type="text" name="login" required><br>
-            Пароль: <br><input type="password" name="password" required><br>
-            <button type="submit">Зарегистрироваться</button>
-          </form>
-        </div>
-        
-        <div class="form-container">
-          <h3>Авторизация (POST /aut)</h3>
-          <form action="/aut" method="POST">
-            Логин: <br><input type="text" name="login" required><br>
-            Пароль: <br><input type="password" name="password" required><br>
-            <button type="submit">Войти</button>
-          </form>
-        </div>
-        
-        <p><a href="/ping">Проверить /ping</a></p>
-        <p>Текущее время: ${new Date().toLocaleTimeString()}</p>
-        <p>Количество пользователей в памяти: ${users.length}</p>
-      </body>
-      </html>
-    `);
-  } catch (err) {
-    res.send(`
-      <h1>⚠️ Сервер работает, но БД нет</h1>
-      <p>Ошибка: ${err.message}</p>
-      <p>Проверьте подключение к PostgreSQL</p>
-    `);
-  }
-});
+// Временное хранилище пользователей (для теста)
+const users = [];
 
-// Регистрация
+// ★ ★ ★ ГЛАВНОЕ: Единый формат ответа ★ ★ ★
+const sendResponse = (res, success, data, error = null) => {
+  res.json({
+    success: success,
+    data: data,
+    error: error,
+    timestamp: new Date().toISOString()
+  });
+};
+
+// ★ 1. РЕГИСТРАЦИЯ (POST /reg)
 app.post('/reg', async (req, res) => {
   const { login, password } = req.body;
   
+  // Проверка входных данных
+  if (!login || !password) {
+    return sendResponse(res, false, null, 'Missing login or password');
+  }
+  
   try {
-    // Проверяем в БД
-    const result = await pool.query('SELECT * FROM users WHERE login = $1', [login]);
-    
-    if (result.rows.length > 0) {
-      return res.json({ error: 'User already exists in database' });
+    // Если есть БД - сохраняем туда
+    if (pool) {
+      await pool.query(
+        'INSERT INTO users (login, password) VALUES ($1, $2) ON CONFLICT (login) DO NOTHING',
+        [login, password]
+      );
     }
     
-    // Добавляем в БД
-    await pool.query('INSERT INTO users (login, password) VALUES ($1, $2)', [login, password]);
-    
-    // Также добавляем во временное хранилище для совместимости
-    users.push({ login, password });
-    
-    console.log('Registered in DB:', login);
-    res.json({ success: true, message: 'Registered in database' });
-  } catch (err) {
-    console.log('DB error:', err.message);
-    
-    // Fallback на временное хранилище если БД не работает
+    // Также сохраняем в память
     const existingUser = users.find(u => u.login === login);
-    if (existingUser) {
-      return res.json({ error: 'User already exists in memory' });
+    if (!existingUser) {
+      users.push({ login, password });
     }
     
-    users.push({ login, password });
-    console.log('Registered in memory:', login);
-    res.json({ success: true, message: 'Registered in memory (DB fallback)' });
+    sendResponse(res, true, { message: 'User registered' });
+    
+  } catch (err) {
+    sendResponse(res, false, null, `Database error: ${err.message}`);
   }
 });
 
-// Авторизация
+// ★ 2. АВТОРИЗАЦИЯ (POST /aut) - ТОТ САМЫЙ ЭНДПОИНТ
 app.post('/aut', async (req, res) => {
   const { login, password } = req.body;
   
-  try {
-    // Пробуем найти в БД
-    const result = await pool.query(
-      'SELECT * FROM users WHERE login = $1 AND password = $2',
-      [login, password]
-    );
-    
-    if (result.rows.length > 0) {
-      return res.json({ success: true, data: '15,20000,66,100', source: 'database' });
-    }
-  } catch (err) {
-    console.log('DB auth error:', err.message);
+  // Проверка входных данных
+  if (!login || !password) {
+    return sendResponse(res, false, null, 'Missing login or password');
   }
   
-  // Fallback на временное хранилище
-  const user = users.find(u => u.login === login && u.password === password);
-  if (user) {
-    res.json({ success: true, data: '15,20000,66,100', source: 'memory' });
-  } else {
-    res.json({ error: 'Invalid credentials' });
+  try {
+    // Сначала проверяем в БД
+    if (pool) {
+      const result = await pool.query(
+        'SELECT * FROM users WHERE login = $1 AND password = $2',
+        [login, password]
+      );
+      
+      if (result.rows.length > 0) {
+        // ★ ВОТ ЭТО ОЖИДАЕТ KOTLIN ПРИЛОЖЕНИЕ ★
+        return sendResponse(res, true, '15,20000,66,100');
+      }
+    }
+    
+    // Если БД нет или пользователь не найден - проверяем в памяти
+    const user = users.find(u => u.login === login && u.password === password);
+    if (user) {
+      // ★ ВОТ ЭТО ОЖИДАЕТ KOTLIN ПРИЛОЖЕНИЕ ★
+      return sendResponse(res, true, '15,20000,66,100');
+    }
+    
+    // Если пользователь не найден
+    sendResponse(res, false, null, 'Invalid login or password');
+    
+  } catch (err) {
+    sendResponse(res, false, null, `Server error: ${err.message}`);
   }
 });
 
-// ★ Health check для Render
+// ★ 3. ПРОВЕРКА СЕРВЕРА (GET /ping)
 app.get('/ping', (req, res) => {
-  res.send('OK');
+  sendResponse(res, true, 'pong');
 });
 
-// ★ Используем порт из переменной окружения
-const PORT = process.env.PORT || 3000;
+// ★ 4. ИНФОРМАЦИЯ О СЕРВЕРЕ (GET /info)
+app.get('/info', (req, res) => {
+  sendResponse(res, true, {
+    server: 'StreetRacing Auth Server',
+    port: PORT,
+    database: pool ? 'connected' : 'not connected',
+    usersInMemory: users.length,
+    endpoints: ['POST /reg', 'POST /aut', 'GET /ping']
+  });
+});
 
+// ★ 5. HTML страница для браузера (ОПЦИОНАЛЬНО)
+app.get('/', (req, res) => {
+  res.send(`
+    <html>
+    <head><title>Auth Server API</title></head>
+    <body>
+      <h1>StreetRacing Auth Server</h1>
+      <p>Server is running on port ${PORT}</p>
+      <p>Use these endpoints:</p>
+      <ul>
+        <li><strong>POST /reg</strong> - регистрация</li>
+        <li><strong>POST /aut</strong> - авторизация (для Kotlin app)</li>
+        <li><strong>GET /ping</strong> - проверка сервера</li>
+        <li><strong>GET /info</strong> - информация о сервере</li>
+      </ul>
+      <p>Kotlin app expects JSON: {"success": true, "data": "15,20000,66,100"}</p>
+    </body>
+    </html>
+  `);
+});
+
+// ★ Запуск сервера
 app.listen(PORT, () => {
-  console.log('='.repeat(50));
-  console.log(`✅ Сервер запущен на порту ${PORT}!`);
-  console.log(`📌 Ссылка: https://your-service.onrender.com`);
-  console.log('='.repeat(50));
+  console.log('='.repeat(60));
+  console.log(`✅ Auth Server запущен на порту ${PORT}`);
+  console.log(`📌 Для Kotlin app: POST /aut`);
+  console.log(`📌 Формат ответа: {"success": true, "data": "15,20000,66,100"}`);
+  console.log('='.repeat(60));
 });
