@@ -1,7 +1,7 @@
 const express = require('express');
 const app = express();
-const mysql = require('mysql');
-
+//const mysql = require('mysql');
+const { Pool } = require('pg');
 // Только Express парсеры
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -13,6 +13,11 @@ let sqlconnection = mysql.createPool({
   user: "user1",
   password: '123456789',
   database: 'users'
+});
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false } // ОБЯЗАТЕЛЬНО для Render
 });
 
 // ★ ДОБАВЛЕНО: Главная страница
@@ -42,6 +47,22 @@ app.get('/', (req, res) => {
       <p>Время: ${new Date().toLocaleTimeString()}</p>
     </body>
     </html>
+
+    
+    const dbResult = await pool.query('SELECT NOW()');
+    res.send(`
+      <h1>✅ Сервер работает!</h1>
+      <p>Порт: ${PORT}</p>
+      <p>Время в БД: ${dbResult.rows[0].now}</p>
+      <p>PostgreSQL: подключено</p>
+    `);
+  } catch (err) {
+    res.send(`
+      <h1>⚠️ Сервер работает, но БД нет</h1>
+      <p>Ошибка: ${err.message}</p>
+    `);
+  }
+  
   `);
 });
 
@@ -99,4 +120,5 @@ app.listen(10000, '0.0.0.0', () => {
   console.log('='.repeat(50));
 
 });
+
 
