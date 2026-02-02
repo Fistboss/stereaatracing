@@ -1,146 +1,106 @@
 const express = require('express');
-const { Pool } = require('pg');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Парсеры для JSON
+// ВАЖНО: Только JSON парсер
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// PostgreSQL подключение
-let pool;
-if (process.env.DATABASE_URL) {
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+// Хранилище в памяти
+const users = [
+  { login: 'test', password: 'test', data: '15,20000,66,100' }
+];
+
+// ★ ★ ★ ГЛАВНЫЙ ЭНДПОИНТ ДЛЯ KOTLIN ★ ★ ★
+app.post('/aut', (req, res) => {
+  console.log('📱 Kotlin запрос на /aut:', req.body);
+  
+  const { login, password } = req.body;
+  
+  if (!login || !password) {
+    console.log('❌ Нет логина или пароля');
+    return res.json({
+      success: false,
+      error: 'Нужны login и password'
+    });
+  }
+  
+  // Ищем пользователя
+  const user = users.find(u => 
+    u.login === login && u.password === password
+  );
+  
+  if (user) {
+    console.log('✅ Успешная авторизация:', login);
+    // ★ ВОТ ТОТ САМЫЙ ОТВЕТ ДЛЯ KOTLIN ★
+    res.json({
+      success: true,
+      data: user.data
+    });
+  } else {
+    console.log('❌ Неверные данные:', login);
+    res.json({
+      success: false,
+      error: 'Неверный логин или пароль'
+    });
+  }
+});
+
+// ★ Регистрация (простая)
+app.post('/reg', (req, res) => {
+  const { login, password } = req.body;
+  
+  if (!login || !password) {
+    return res.json({
+      success: false,
+      error: 'Нужны login и password'
+    });
+  }
+  
+  const existingUser = users.find(u => u.login === login);
+  if (existingUser) {
+    return res.json({
+      success: false,
+      error: 'Пользователь уже существует'
+    });
+  }
+  
+  users.push({
+    login,
+    password,
+    data: '15,20000,66,100' // Стандартные данные
   });
-}
-
-// Временное хранилище пользователей (для теста)
-const users = [];
-
-// ★ ★ ★ ГЛАВНОЕ: Единый формат ответа ★ ★ ★
-const sendResponse = (res, success, data, error = null) => {
+  
+  console.log('✅ Новый пользователь:', login);
+  
   res.json({
-    success: success,
-    data: data,
-    error: error,
-    timestamp: new Date().toISOString()
+    success: true,
+    message: 'Пользователь создан'
   });
-};
-
-// ★ 1. РЕГИСТРАЦИЯ (POST /reg)
-app.post('/reg', async (req, res) => {
-  const { login, password } = req.body;
-  
-  // Проверка входных данных
-  if (!login || !password) {
-    return sendResponse(res, false, null, 'Missing login or password');
-  }
-  
-  try {
-    // Если есть БД - сохраняем туда
-    if (pool) {
-      await pool.query(
-        'INSERT INTO users (login, password) VALUES ($1, $2) ON CONFLICT (login) DO NOTHING',
-        [login, password]
-      );
-    }
-    
-    // Также сохраняем в память
-    const existingUser = users.find(u => u.login === login);
-    if (!existingUser) {
-      users.push({ login, password });
-    }
-    
-    sendResponse(res, true, { message: 'User registered' });
-    
-  } catch (err) {
-    sendResponse(res, false, null, `Database error: ${err.message}`);
-  }
 });
 
-// ★ 2. АВТОРИЗАЦИЯ (POST /aut) - ТОТ САМЫЙ ЭНДПОИНТ
-app.post('/aut', async (req, res) => {
-  const { login, password } = req.body;
-  
-  // Проверка входных данных
-  if (!login || !password) {
-    return sendResponse(res, false, null, 'Missing login or password');
-  }
-  
-  try {
-    // Сначала проверяем в БД
-    if (pool) {
-      const result = await pool.query(
-        'SELECT * FROM users WHERE login = $1 AND password = $2',
-        [login, password]
-      );
-      
-      if (result.rows.length > 0) {
-        // ★ ВОТ ЭТО ОЖИДАЕТ KOTLIN ПРИЛОЖЕНИЕ ★
-        return sendResponse(res, true, '15,20000,66,100');
-      }
-    }
-    
-    // Если БД нет или пользователь не найден - проверяем в памяти
-    const user = users.find(u => u.login === login && u.password === password);
-    if (user) {
-      // ★ ВОТ ЭТО ОЖИДАЕТ KOTLIN ПРИЛОЖЕНИЕ ★
-      return sendResponse(res, true, '15,20000,66,100');
-    }
-    
-    // Если пользователь не найден
-    sendResponse(res, false, null, 'Invalid login or password');
-    
-  } catch (err) {
-    sendResponse(res, false, null, `Server error: ${err.message}`);
-  }
-});
-
-// ★ 3. ПРОВЕРКА СЕРВЕРА (GET /ping)
+// ★ Проверка сервера
 app.get('/ping', (req, res) => {
-  sendResponse(res, true, 'pong');
+  res.json({ status: 'ok', server: 'streetracing' });
 });
 
-// ★ 4. ИНФОРМАЦИЯ О СЕРВЕРЕ (GET /info)
-app.get('/info', (req, res) => {
-  sendResponse(res, true, {
-    server: 'StreetRacing Auth Server',
-    port: PORT,
-    database: pool ? 'connected' : 'not connected',
-    usersInMemory: users.length,
-    endpoints: ['POST /reg', 'POST /aut', 'GET /ping']
-  });
-});
-
-// ★ 5. HTML страница для браузера (ОПЦИОНАЛЬНО)
+// ★ Информация
 app.get('/', (req, res) => {
   res.send(`
-    <html>
-    <head><title>Auth Server API</title></head>
-    <body>
-      <h1>StreetRacing Auth Server</h1>
-      <p>Server is running on port ${PORT}</p>
-      <p>Use these endpoints:</p>
-      <ul>
-        <li><strong>POST /reg</strong> - регистрация</li>
-        <li><strong>POST /aut</strong> - авторизация (для Kotlin app)</li>
-        <li><strong>GET /ping</strong> - проверка сервера</li>
-        <li><strong>GET /info</strong> - информация о сервере</li>
-      </ul>
-      <p>Kotlin app expects JSON: {"success": true, "data": "15,20000,66,100"}</p>
-    </body>
-    </html>
+    <h1>StreetRacing Auth Server</h1>
+    <p>Порт: ${PORT}</p>
+    <p>Пользователей: ${users.length}</p>
+    <p>Для Kotlin: POST /aut с JSON {"login":"test","password":"test"}</p>
   `);
 });
 
-// ★ Запуск сервера
+// ★ Запуск
 app.listen(PORT, () => {
-  console.log('='.repeat(60));
-  console.log(`✅ Auth Server запущен на порту ${PORT}`);
-  console.log(`📌 Для Kotlin app: POST /aut`);
-  console.log(`📌 Формат ответа: {"success": true, "data": "15,20000,66,100"}`);
-  console.log('='.repeat(60));
+  console.log('='.repeat(50));
+  console.log(`🚀 Сервер запущен на порту ${PORT}`);
+  console.log(`📱 Kotlin endpoint: POST /aut`);
+  console.log('='.repeat(50));
+  console.log('Тестовый пользователь:');
+  console.log('  Логин: test');
+  console.log('  Пароль: test');
+  console.log('='.repeat(50));
 });
